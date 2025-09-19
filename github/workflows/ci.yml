@@ -1,0 +1,276 @@
+name: CI with Docker Compose (MySQL)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2️⃣ Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 3️⃣ Create directories for test artifacts
+      - name: Create test directories
+        run: |
+          mkdir -p ./build/reports/tests/test
+          mkdir -p ./build/test-results/test
+
+      # 4️⃣ Build and start Docker Compose services
+      - name: Build and start Docker Compose services
+        run: |
+          docker compose up --build -d
+          echo "Waiting for database and app containers to start..."
+          sleep 20
+
+      # 5️⃣ Check container status
+      - name: Check container status
+        run: |
+          echo "🔍 Checking container status..."
+          docker ps -a
+          echo ""
+          echo "🔍 Docker Compose services:"
+          docker compose ps
+
+      # 6️⃣ Wait for MySQL to be healthy
+      - name: Wait for MySQL to be healthy
+        run: |
+          echo "Waiting for MySQL to be healthy..."
+          timeout=90
+          counter=0
+          
+          while [ $counter -lt $timeout ]; do
+            if docker exec blog-database mysqladmin ping -h localhost -u root -pServer123@ --silent 2>/dev/null; then
+              echo "✅ MySQL is ready!"
+              break
+            fi
+            echo "⏳ MySQL not ready yet, waiting... ($counter/$timeout)"
+            sleep 3
+            counter=$((counter + 3))
+          done
+          
+          if [ $counter -ge $timeout ]; then
+            echo "❌ MySQL failed to start within $timeout seconds"
+            echo "📋 MySQL logs:"
+            docker compose logs db
+            exit 1
+          fi
+
+      # 7️⃣ Check Spring Boot app logs early
+      - name: Check Spring Boot application logs
+        run: |
+          echo "📋 Early Spring Boot app logs:"
+          docker compose logs spring-app
+          echo ""
+          echo "🔍 Container status:"
+          docker ps -a
+
+      # 8️⃣ Wait for Spring Boot application (simple port check)
+      - name: Wait for Spring Boot application (port check only)
+        run: |
+          echo "Waiting for Spring Boot application port 8081 to be ready..."
+          timeout=120
+          counter=0
+          
+          while [ $counter -lt $timeout ]; do
+            # Check if container is still running
+            if ! docker ps --format "{{.Names}}" | grep -q "blog-backend"; then
+              echo "❌ Spring Boot container (blog-backend) is not running!"
+              echo "📋 Container logs:"
+              docker compose logs spring-app
+              echo "📋 Container status:"
+              docker ps -a
+              exit 1
+            fi
+          
+            # Simple port check - just see if anything is listening on port 8081
+            if nc -z localhost 8081 2>/dev/null; then
+              echo "✅ Spring Boot application port 8081 is responding!"
+          
+              # Optional: Try to get any HTTP response (even 404 is fine)
+              http_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ 2>/dev/null || echo "000")
+              echo "HTTP response status from port 8081: $http_status"
+          
+              if [ "$http_status" != "000" ]; then
+                echo "✅ Application is responding to HTTP requests!"
+              else
+                echo "✅ Port is open, application should be ready!"
+              fi
+              break
+            fi
+          
+            echo "⏳ Port 8081 not ready yet, waiting... ($counter/$timeout)"
+            sleep 3
+            counter=$((counter + 3))
+          done
+          
+          if [ $counter -ge $timeout ]; then
+            echo "❌ Spring Boot application port failed to respond within $timeout seconds"
+            echo ""
+            echo "📋 Final Spring Boot logs:"
+            docker compose logs spring-app
+            echo ""
+            echo "📋 MySQL logs:"
+            docker compose logs db
+            echo ""
+            echo "🔍 Final container status:"
+            docker ps -a
+            exit 1
+          fi
+
+      # 9️⃣ Run basic connectivity tests
+      - name: Run basic connectivity tests
+        run: |
+          echo "Running basic connectivity tests..."
+          
+          # Test if port 8081 is accessible
+          echo "🔍 Testing port 8081 connectivity..."
+          if nc -z localhost 8081; then
+            echo "✅ Port 8081 is accessible"
+          else
+            echo "❌ Port 8081 is not accessible"
+            exit 1
+          fi
+          
+          # Try to get any HTTP response
+          echo ""
+          echo "🔍 Testing HTTP connectivity..."
+          http_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ 2>/dev/null)
+          echo "HTTP status from root endpoint: $http_status"
+          
+          # Accept any HTTP response as success (200, 404, 500, etc.)
+          if [ "$http_status" != "000" ]; then
+            echo "✅ Application is responding to HTTP requests!"
+          else
+            echo "⚠️ No HTTP response received, but port might still be working"
+          fi
+          
+          # Test database connectivity from host
+          echo ""
+          echo "🔍 Testing MySQL connectivity..."
+          if docker exec blog-database mysqladmin ping -h localhost -u root -pServer123@ --silent; then
+            echo "✅ MySQL database is responsive"
+          else
+            echo "❌ MySQL database connectivity issue"
+            exit 1
+          fi
+
+      # 🔟 Upload test reports (even if empty)
+      - name: Upload test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports-${{ github.run_number }}
+          path: |
+            ./build/reports/tests/test/
+            ./build/test-results/test/
+          retention-days: 7
+
+      # 1️⃣1️⃣ Upload application logs
+      - name: Upload application logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: application-logs-${{ github.run_number }}
+          path: |
+            docker-compose-logs.txt
+          retention-days: 3
+
+      # 1️⃣2️⃣ Generate comprehensive logs
+      - name: Generate logs for debugging
+        if: always()
+        run: |
+          echo "Generating comprehensive logs for debugging..."
+          docker compose logs > docker-compose-logs.txt
+          
+          echo ""
+          echo "🔍 Final container status:"
+          docker ps -a
+          
+          echo ""
+          echo "🔍 Docker images:"
+          docker images
+          
+          echo ""
+          echo "🔍 Network connectivity test:"
+          nc -z localhost 8081 && echo "Port 8081: OPEN" || echo "Port 8081: CLOSED"
+          nc -z localhost 3307 && echo "Port 3307: OPEN" || echo "Port 3307: CLOSED"
+
+      # 1️⃣3️⃣ Clean up Docker Compose
+      - name: Clean up Docker Compose
+        if: always()
+        run: |
+          echo "Cleaning up Docker Compose services..."
+          docker compose down -v --remove-orphans
+          docker system prune -f
+
+  # Docker Build and Push job
+  docker-build:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'  # Only run on push, not PRs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: godfrey10
+          password: godfreygrace10
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: godfrey10/dockerdeploy-fullstack
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Deploy job
+  deploy:
+    needs: [build-and-test, docker-build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging/production
+        run: |
+          echo "🚀 Deployment would happen here..."
+          echo "Application passed all connectivity tests!"
+          echo "Docker image has been built and pushed successfully!"
+          
+          # Example deployment commands you could add:
+          # - Deploy to cloud provider (AWS, Azure, GCP)
+          # - Update Kubernetes deployments
+          # - Run database migrations
+          # - Send notifications

@@ -1,27 +1,30 @@
-# --- Stage 1: Build the application using Gradle with JDK 21 ---
-FROM gradle:8.5-jdk21 AS build
-
-WORKDIR /home/gradle/src
-COPY --chown=gradle:gradle . .
-
-# Skip tests during build for faster CI/CD (optional)
-RUN gradle clean build -x test --no-daemon
-
-# --- Stage 2: Run the built JAR using a lightweight JDK 21 image ---
-FROM openjdk:21-jdk-slim AS production
-
-# Set a working directory
+# === Build stage ===
+# Use a specific Gradle version with JDK 17
+FROM gradle:8.7-jdk17 AS build
 WORKDIR /app
 
-# Copy the jar built from the Gradle stage
-COPY --from=build /home/gradle/src/build/libs/*.jar /app/app.jar
+# Copy build files first for better caching
+COPY build.gradle settings.gradle /app/
+COPY gradlew /app/
+COPY gradle /app/gradle
 
-# Expose port 8080 (matches docker-compose)
+# Copy source code
+COPY src /app/src
+
+# Make gradlew executable and build the application
+RUN chmod +x gradlew
+RUN ./gradlew clean bootJar --no-daemon
+
+# === Runtime stage ===
+# Use a lightweight JRE image
+FROM eclipse-temurin:17-jre-jammy
+WORKDIR /app
+
+# Copy the built JAR from the build stage
+COPY --from=build /app/build/libs/*.jar /app/app.jar
+
+# Expose the port Spring Boot runs on
 EXPOSE 8080
 
-# Optional: Environment variables for timezone, locale
-ENV TZ=UTC \
-    LANG=C.UTF-8
-
-# Run the application
+# Command to run the application
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

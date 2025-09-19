@@ -1,7 +1,7 @@
-package com.example.bconnectbackend.configuration.exceptions;
+package com.example.springsecuritydemo2025.configuration.exceptions;
 
-public class ContactNotFoundException extends RuntimeException {
-    public ContactNotFoundException(String message) {
+public class BookNotFoundException extends RuntimeException {
+    public BookNotFoundException(String message) {
         super(message);
     }
 }

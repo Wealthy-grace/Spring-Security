@@ -1,38 +1,96 @@
+#
+#version: '3.8'
+#
+#services:
+#  db:
+#    image: mysql:8.0
+#    container_name: security_demo-database
+#    environment:
+#      MYSQL_ROOT_PASSWORD: Server123@
+#      MYSQL_DATABASE: security_demo
+#    ports:
+#      - "3307:3306"
+#    healthcheck:
+#      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pServer123@"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#    networks:
+#      - backend
+#
+#  spring-app:
+#    build: .
+#    container_name: security_demo-backend
+#    ports:
+#      - "8080:8080"
+#    depends_on:
+#      db:
+#        condition: service_healthy
+#    environment:
+#      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/security_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+#      SPRING_DATASOURCE_USERNAME: root
+#      SPRING_DATASOURCE_PASSWORD: Server123@
+#      SPRING_DATASOURCE_DRIVER_CLASS_NAME: com.mysql.cj.jdbc.Driver
+#      SERVER_ADDRESS: 0.0.0.0
+#    networks:
+#      - backend
+#
+#networks:
+#  backend:
+
+
+#testing
+
 version: '3.8'
 
 services:
   db:
     image: mysql:8.0
-    container_name: blog-database
+    container_name: security_demo-database
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: Server123@
-      MYSQL_DATABASE: blog
+      MYSQL_DATABASE: security_demo
+      MYSQL_ROOT_HOST: '%'
     ports:
       - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pServer123@"]
-      interval: 10s
-      timeout: 5s
+      interval: 30s
+      timeout: 10s
       retries: 5
+      start_period: 30s
     networks:
       - backend
 
   spring-app:
-    build: .
-    container_name: blog-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: security_demo-backend
+    restart: unless-stopped
     ports:
       - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/blog?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/security_demo?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&createDatabaseIfNotExist=true
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: Server123@
-      SPRING_DATASOURCE_DRIVER_CLASS_NAME: com.mysql.cj.jdbc.Driver
+      JWT_SECRET: mySecretKey123912738aopsgjnspkmndfsopkvajoirjg94gf2opfng2moknmVeryLongSecretKeyForProduction
+      JWT_EXPIRATION: 86400000
       SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 8080
     networks:
       - backend
 
 networks:
   backend:
+    driver: bridge
+
+volumes:
+  mysql_data:

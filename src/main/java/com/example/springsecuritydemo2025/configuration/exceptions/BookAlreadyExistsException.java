@@ -1,7 +1,7 @@
-package com.example.bconnectbackend.configuration.exceptions;
+package com.example.springsecuritydemo2025.configuration.exceptions;
 
-public class ContactAlreadyExistsException extends RuntimeException {
-    public ContactAlreadyExistsException(String message) {
+public class BookAlreadyExistsException extends RuntimeException {
+    public BookAlreadyExistsException(String message) {
         super(message);
     }
 }

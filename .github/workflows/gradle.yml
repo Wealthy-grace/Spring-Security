@@ -238,7 +238,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: godfrey10
-          password: ${{ secrets.DOCKER_PASSWORD }}  # Use secrets instead of hardcoded password
+          password: godfreygrace10 # Use secrets instead of hardcoded password
 
       - name: Extract metadata
         id: meta

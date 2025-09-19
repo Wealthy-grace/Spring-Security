@@ -45,11 +45,19 @@ jobs:
       - name: Wait for MySQL to be healthy
         run: |
           echo "Waiting for MySQL to be healthy..."
-          timeout=90
+          timeout=120
           counter=0
           
           while [ $counter -lt $timeout ]; do
-            if docker exec blog-database mysqladmin ping -h localhost -u root -pServer123@ --silent 2>/dev/null; then
+            # Check if container is running first
+            if ! docker ps --format "{{.Names}}" | grep -q "security_demo-database"; then
+              echo "❌ MySQL container (security_demo-database) is not running!"
+              docker compose logs db
+              exit 1
+            fi
+          
+            # Test MySQL connection using the correct container name and credentials
+            if docker exec security_demo-database mysqladmin ping -h localhost -u root -pServer123@ --silent 2>/dev/null; then
               echo "✅ MySQL is ready!"
               break
             fi
@@ -74,17 +82,17 @@ jobs:
           echo "🔍 Container status:"
           docker ps -a
 
-      # 8️⃣ Wait for Spring Boot application (simple port check)
-      - name: Wait for Spring Boot application (port check only)
+      # 8️⃣ Wait for Spring Boot application (correct port 8080)
+      - name: Wait for Spring Boot application
         run: |
-          echo "Waiting for Spring Boot application port 8081 to be ready..."
+          echo "Waiting for Spring Boot application port 8080 to be ready..."
           timeout=120
           counter=0
           
           while [ $counter -lt $timeout ]; do
             # Check if container is still running
-            if ! docker ps --format "{{.Names}}" | grep -q "blog-backend"; then
-              echo "❌ Spring Boot container (blog-backend) is not running!"
+            if ! docker ps --format "{{.Names}}" | grep -q "security_demo-backend"; then
+              echo "❌ Spring Boot container (security_demo-backend) is not running!"
               echo "📋 Container logs:"
               docker compose logs spring-app
               echo "📋 Container status:"
@@ -92,13 +100,13 @@ jobs:
               exit 1
             fi
           
-            # Simple port check - just see if anything is listening on port 8081
-            if nc -z localhost 8081 2>/dev/null; then
-              echo "✅ Spring Boot application port 8081 is responding!"
+            # Check if port 8080 is responding (not 8081)
+            if nc -z localhost 8080 2>/dev/null; then
+              echo "✅ Spring Boot application port 8080 is responding!"
           
-              # Optional: Try to get any HTTP response (even 404 is fine)
-              http_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ 2>/dev/null || echo "000")
-              echo "HTTP response status from port 8081: $http_status"
+              # Try to get any HTTP response
+              http_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null || echo "000")
+              echo "HTTP response status from port 8080: $http_status"
           
               if [ "$http_status" != "000" ]; then
                 echo "✅ Application is responding to HTTP requests!"
@@ -108,7 +116,7 @@ jobs:
               break
             fi
           
-            echo "⏳ Port 8081 not ready yet, waiting... ($counter/$timeout)"
+            echo "⏳ Port 8080 not ready yet, waiting... ($counter/$timeout)"
             sleep 3
             counter=$((counter + 3))
           done
@@ -132,19 +140,19 @@ jobs:
         run: |
           echo "Running basic connectivity tests..."
           
-          # Test if port 8081 is accessible
-          echo "🔍 Testing port 8081 connectivity..."
-          if nc -z localhost 8081; then
-            echo "✅ Port 8081 is accessible"
+          # Test if port 8080 is accessible (not 8081)
+          echo "🔍 Testing port 8080 connectivity..."
+          if nc -z localhost 8080; then
+            echo "✅ Port 8080 is accessible"
           else
-            echo "❌ Port 8081 is not accessible"
+            echo "❌ Port 8080 is not accessible"
             exit 1
           fi
           
           # Try to get any HTTP response
           echo ""
           echo "🔍 Testing HTTP connectivity..."
-          http_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/ 2>/dev/null)
+          http_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ 2>/dev/null)
           echo "HTTP status from root endpoint: $http_status"
           
           # Accept any HTTP response as success (200, 404, 500, etc.)
@@ -154,10 +162,10 @@ jobs:
             echo "⚠️ No HTTP response received, but port might still be working"
           fi
           
-          # Test database connectivity from host
+          # Test database connectivity using correct container name
           echo ""
           echo "🔍 Testing MySQL connectivity..."
-          if docker exec blog-database mysqladmin ping -h localhost -u root -pServer123@ --silent; then
+          if docker exec security_demo-database mysqladmin ping -h localhost -u root -pServer123@ --silent; then
             echo "✅ MySQL database is responsive"
           else
             echo "❌ MySQL database connectivity issue"
@@ -202,7 +210,7 @@ jobs:
           
           echo ""
           echo "🔍 Network connectivity test:"
-          nc -z localhost 8081 && echo "Port 8081: OPEN" || echo "Port 8081: CLOSED"
+          nc -z localhost 8080 && echo "Port 8080: OPEN" || echo "Port 8080: CLOSED"
           nc -z localhost 3307 && echo "Port 3307: OPEN" || echo "Port 3307: CLOSED"
 
       # 1️⃣3️⃣ Clean up Docker Compose
@@ -230,13 +238,13 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: godfrey10
-          password: godfreygrace10
+          password: ${{ secrets.DOCKER_PASSWORD }}  # Use secrets instead of hardcoded password
 
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: godfrey10/dockerdeploy-fullstack
+          images: godfrey10/spring-security-demo
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -268,9 +276,3 @@ jobs:
           echo "🚀 Deployment would happen here..."
           echo "Application passed all connectivity tests!"
           echo "Docker image has been built and pushed successfully!"
-          
-          # Example deployment commands you could add:
-          # - Deploy to cloud provider (AWS, Azure, GCP)
-          # - Update Kubernetes deployments
-          # - Run database migrations
-          # - Send notifications
